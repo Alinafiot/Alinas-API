@@ -1,12 +1,12 @@
+
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using System;
-using System.Collections.Generic;
 using System.Net.Http;
-using System.Text;
 using System.Threading.Tasks;
-using Newtonsoft.Json.Linq;
-using Alina_sApi.Model; 
+using Alina_sApi.Model;
+using Newtonsoft.Json;
+using System.Text;
 
 namespace Alina_sApi.Controllers
 {
@@ -14,68 +14,214 @@ namespace Alina_sApi.Controllers
     [Route("[controller]")]
     public class BookController : ControllerBase
     {
-        private readonly IHttpClientFactory _clientFactory;
         private readonly ILogger<BookController> _logger;
 
-        public BookController(IHttpClientFactory clientFactory, ILogger<BookController> logger)
+        public BookController(ILogger<BookController> logger)
         {
-            _clientFactory = clientFactory;
             _logger = logger;
         }
 
-        [HttpGet(Name = "SearchBooksByGenre")]
-        public async Task<ActionResult<string>> Get(string genre, int count)
+        [HttpGet("genre", Name = "SearchBooksByGenre")]
+        public async Task<ActionResult<string>> GetByGenre(string genre, int count)
         {
             if (count > 50)
             {
-                return BadRequest("����������� ������� ���� ��� ��������� - 50.");
+                return BadRequest("Максимальна кількість книг для виведення - 50.");
+            }
+
+            if (string.IsNullOrEmpty(genre))
+            {
+                return BadRequest("Назва жанру не може бути порожньою.");
             }
 
             try
             {
-                var client = _clientFactory.CreateClient();
-                var response = await client.GetAsync($"https://www.googleapis.com/books/v1/volumes?q=subject:{genre}&maxResults={count}");
+                using (var client = new HttpClient())
+                {
+                    var response = await client.GetAsync($"https://www.googleapis.com/books/v1/volumes?q=subject:{genre}&maxResults={count}");
 
-                response.EnsureSuccessStatusCode();
+                    response.EnsureSuccessStatusCode();
 
-                string responseBody = await response.Content.ReadAsStringAsync();
-                return Ok(ParseResponse(responseBody));
+                    string responseBody = await response.Content.ReadAsStringAsync();
+                    var books = JsonConvert.DeserializeObject<Search.GoogleBooksResponse>(responseBody);
+
+                    // Формуємо рядок для кожної книги
+                    var bookInfo = new StringBuilder();
+                    foreach (var item in books.Items)
+                    {
+                        var authors = item.VolumeInfo.Authors != null ? string.Join(", ", item.VolumeInfo.Authors) : "Невідомий автор";
+                        var title = item.VolumeInfo.Title ?? "Невідома назва";
+                        bookInfo.AppendLine($"Автор(и): {authors}");
+                        bookInfo.AppendLine($"Назва: {title}");
+                        bookInfo.AppendLine(); // Додатковий рядок для розділення книг
+                    }
+
+                    return Ok(bookInfo.ToString());
+                }
             }
             catch (HttpRequestException e)
             {
-                _logger.LogError($"������� HTTP-������: {e.Message}");
-                return StatusCode(500, "������� ��� ������� ������. ���� �����, ��������� �� ��� ������.");
+                _logger.LogError($"Помилка HTTP-запиту: {e.Message}");
+                return StatusCode(500, "Помилка при обробці запиту. Будь ласка, спробуйте ще раз пізніше.");
             }
             catch (Exception ex)
             {
-                _logger.LogError($"�������: {ex.Message}");
-                return StatusCode(500, "�������� ������� �������. ���� �����, ��������� �� ��� ������.");
+                _logger.LogError($"Помилка: {ex.Message}");
+                return StatusCode(500, "Внутрішня помилка сервера. Будь ласка, спробуйте ще раз пізніше.");
             }
         }
 
-        private string ParseResponse(string responseBody)
+
+        [HttpGet("title", Name = "SearchBooksByTitle")]
+        public async Task<ActionResult<string>> GetByTitle(string title)
         {
-            var books = new List<SearchGende.BookItem>(); 
-
-            JObject jsonResponse = JObject.Parse(responseBody);
-            JArray items = (JArray)jsonResponse["items"];
-
-            StringBuilder result = new StringBuilder();
-            foreach (JToken item in items)
+            if (string.IsNullOrEmpty(title))
             {
-                string title = item["volumeInfo"]["title"].ToString();
-                var authors = item["volumeInfo"]["authors"]?.ToObject<List<string>>() ?? new List<string>();
-
-                result.AppendLine($"�����: {title}");
-                result.AppendLine("�����(�):");
-                foreach (var author in authors)
-                {
-                    result.AppendLine($"- {author}");
-                }
-                result.AppendLine();
+                return BadRequest("Назва книги не може бути порожньою.");
             }
 
-            return result.ToString();
+            try
+            {
+                using (var client = new HttpClient())
+                {
+                    var response = await client.GetAsync($"https://www.googleapis.com/books/v1/volumes?q=intitle:{title}");
+
+                    response.EnsureSuccessStatusCode();
+
+                    string responseBody = await response.Content.ReadAsStringAsync();
+                    var books = JsonConvert.DeserializeObject<Search.GoogleBooksResponse>(responseBody);
+
+                    // Формуємо рядок для книг
+                    var bookInfo = new StringBuilder();
+                    var counter = 0;
+                    foreach (var item in books.Items)
+                    {
+                        var authors = item.VolumeInfo.Authors != null ? string.Join(", ", item.VolumeInfo.Authors) : "Невідомий автор";
+                        var bookTitle = item.VolumeInfo.Title ?? "Невідома назва";
+                        bookInfo.AppendLine($"Назва: {bookTitle}");
+                        bookInfo.AppendLine($"Автор(и): {authors}");
+                        bookInfo.AppendLine();
+
+                        counter++;
+                        if (counter >= 20) // Виводимо максимум 20 книг
+                            break;
+                    }
+
+                    return Ok(bookInfo.ToString());
+                }
+            }
+            catch (HttpRequestException e)
+            {
+                _logger.LogError($"Помилка HTTP-запиту: {e.Message}");
+                return StatusCode(500, "Помилка при обробці запиту. Будь ласка, спробуйте ще раз пізніше.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Помилка: {ex.Message}");
+                return StatusCode(500, "Внутрішня помилка сервера. Будь ласка, спробуйте ще раз пізніше.");
+            }
+        }
+
+
+        [HttpGet("author", Name = "SearchBooksByAuthor")]
+        public async Task<ActionResult<string>> GetByAuthor(string author)
+        {
+            if (string.IsNullOrEmpty(author))
+            {
+                return BadRequest("Ім'я автора не може бути порожнім.");
+            }
+
+            try
+            {
+                using (var client = new HttpClient())
+                {
+                    var response = await client.GetAsync($"https://www.googleapis.com/books/v1/volumes?q=inauthor:{author}");
+
+                    response.EnsureSuccessStatusCode();
+
+                    string responseBody = await response.Content.ReadAsStringAsync();
+                    var books = JsonConvert.DeserializeObject<Search.GoogleBooksResponse>(responseBody);
+
+                    // Формуємо рядок для книг
+                    var bookInfo = new StringBuilder();
+                    var counter = 0;
+                    foreach (var item in books.Items)
+                    {
+                        var authors = item.VolumeInfo.Authors != null ? string.Join(", ", item.VolumeInfo.Authors) : "Невідомий автор";
+                        var bookTitle = item.VolumeInfo.Title ?? "Невідома назва";
+                        bookInfo.AppendLine($"Автор(и): {authors}");
+                        bookInfo.AppendLine($"Назва: {bookTitle}");
+                        bookInfo.AppendLine();
+
+                        counter++;
+                        if (counter >= 20) // Виводимо максимум 20 книг
+                            break;
+                    }
+
+                    return Ok(bookInfo.ToString());
+                }
+            }
+            catch (HttpRequestException e)
+            {
+                _logger.LogError($"Помилка HTTP-запиту: {e.Message}");
+                return StatusCode(500, "Помилка при обробці запиту. Будь ласка, спробуйте ще раз пізніше.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Помилка: {ex.Message}");
+                return StatusCode(500, "Внутрішня помилка сервера. Будь ласка, спробуйте ще раз пізніше.");
+            }
+        }
+
+
+        [HttpGet("randomBooks", Name = "GetRandomBooks")]
+        public async Task<ActionResult<string>> GetRandomBooks()
+        {
+            try
+            {
+                using (var client = new HttpClient())
+                {
+                    var response = await client.GetAsync("https://www.googleapis.com/books/v1/volumes?q=random&maxResults=10");
+
+                    response.EnsureSuccessStatusCode();
+
+                    string responseBody = await response.Content.ReadAsStringAsync();
+                    var books = JsonConvert.DeserializeObject<Search.GoogleBooksResponse>(responseBody);
+
+                    // Формуємо рядок для книг
+                    var bookInfo = new StringBuilder();
+                    bookInfo.AppendLine("10 випадкових книг:");
+                    foreach (var item in books.Items)
+                    {
+                        var authors = item.VolumeInfo.Authors != null ? string.Join(", ", item.VolumeInfo.Authors) : "Невідомий автор";
+                        var bookTitle = item.VolumeInfo.Title ?? "Невідома назва";
+                        bookInfo.AppendLine($"Автор(и): {authors}");
+                        bookInfo.AppendLine($"Назва: {bookTitle}");
+                        bookInfo.AppendLine();
+                    }
+
+                    return Ok(bookInfo.ToString());
+                }
+            }
+            catch (HttpRequestException e)
+            {
+                _logger.LogError($"Помилка HTTP-запиту: {e.Message}");
+                return StatusCode(500, "Помилка при обробці запиту. Будь ласка, спробуйте ще раз пізніше.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Помилка: {ex.Message}");
+                return StatusCode(500, "Внутрішня помилка сервера. Будь ласка, спробуйте ще раз пізніше.");
+            }
+        }
+
+        [HttpPost]
+
+
+
+        private bool IsValidQuery(string query)
+        {
+            return true;
         }
     }
 }
