@@ -1,8 +1,9 @@
-﻿using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
+﻿sing Newtonsoft.Json;
+using System.Collections.Generic;
+
 namespace Alina_sApi.Model
 {
-    public class SearchGende
+    public class Search
     {
         public class GoogleBooksResponse
         {
