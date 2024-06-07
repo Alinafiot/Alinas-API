@@ -1,7 +1,4 @@
-﻿sing Newtonsoft.Json;
-using System.Collections.Generic;
-
-namespace Alina_sApi.Model
+﻿namespace Alina_sApi.Model
 {
     public class Search
     {
@@ -20,11 +17,12 @@ namespace Alina_sApi.Model
             public string Title { get; set; }
             public List<string> Authors { get; set; }
         }
-
-        public class BookItem
-        {
-            public string Title { get; set; }
-            public List<string> Authors { get; set; }
-        }
     }
+
+    public class ReviewRequest
+    {
+        public string BookName { get; set; }
+        public int Rating { get; set; }
+    }
+
 }
